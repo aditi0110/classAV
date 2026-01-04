@@ -11,10 +11,11 @@
 #' @param k Integer; number of rows in the subselection using IBOSS.
 #'
 #'
-#' @useDynLib SUBLIME, .registration = TRUE
+#' @useDynLib class, .registration = TRUE
 #' @importFrom Rcpp evalCpp
 #' @importFrom stats coef
 #' @importFrom stats lm.fit
+#' @import glmnet
 #'
 #' @return A list with:
 #' \itemize{
