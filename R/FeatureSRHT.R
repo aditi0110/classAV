@@ -1,102 +1,76 @@
-# run_isrht.R
+#' Run FeatureSRHT Algorithm
+#'
+#' Runs variants of Feature Subsampled Randomized Hadamard Transform (FeatureSRHT)
+#' for dimensionality reduction and regression.
+#'
+#' @param X Numeric matrix of predictors.
+#' @param y Numeric vector of response variable.
+#' @param csv Path to CSV file (alternative to X, y). Last column is response.
+#' @param r Integer; target dimension size (features to select).
+#' @param bins Integer; bins for Supervised method.
+#' @param header Logical; if csv has header.
+#' @param X_test Numeric matrix; optional test predictors.
+#' @param y_test Numeric vector; optional test response.
+#' @param method Character; Which methods to run. Options: "uniform" (default),
+#'   "top_r", "leverage", "supervised", or "all".
+#'
+#' @useDynLib FeatureSRHT, .registration = TRUE
+#' @importFrom Rcpp evalCpp
+#' @importFrom data.table fread
+#'
+#' @return A list containing results for the selected methods.
+#' @export
+FeatureSRHT <- function(X = NULL, y = NULL, csv = NULL, 
+                        r = 50, bins = 10, header = FALSE,
+                        X_test = NULL, y_test = NULL,
+                        method = "uniform") {
 
-# --- 1. Robust Package Installation ---
-ensure_package <- function(pkg) {
-  if (!require(pkg, character.only = TRUE)) {
-    install.packages(pkg, repos = "http://cran.us.r-project.org")
-    if (!require(pkg, character.only = TRUE)) stop(paste("Failed to install", pkg))
+  # --- Method Parsing ---
+  valid_methods <- c("uniform", "top_r", "leverage", "supervised", "all")
+  method <- match.arg(method, valid_methods, several.ok = TRUE)
+
+  if ("all" %in% method) {
+      run_uni <- TRUE; run_top <- TRUE; run_lev <- TRUE; run_sup <- TRUE
+  } else {
+      run_uni <- "uniform" %in% method
+      run_top <- "top_r" %in% method
+      run_lev <- "leverage" %in% method
+      run_sup <- "supervised" %in% method
   }
+
+  # --- Data Loading ---
+  if (!is.null(csv)) {
+    if (!file.exists(csv)) stop("CSV file doesn't exist.")
+    if (!is.null(X) || !is.null(y)) stop("Provide csv OR {X,y}.")
+    dat <- data.table::fread(csv, header = header)
+    dat <- as.matrix(dat)
+    X <- dat[, -ncol(dat), drop = FALSE]
+    y <- dat[, ncol(dat)]
+  } else {
+    if (is.null(X) || is.null(y)) stop("Provide csv OR {X, y}.")
+    if (!is.matrix(X)) X <- as.matrix(X)
+  }
+
+  if (nrow(X) != length(y)) stop("Row mismatch in Train data.")
+
+  # --- Test Data Check ---
+  if (!is.null(X_test) && !is.null(y_test)) {
+      if (!is.matrix(X_test)) X_test <- as.matrix(X_test)
+      if (nrow(X_test) != length(y_test)) stop("Row mismatch in Test data.")
+      if (ncol(X_test) != ncol(X)) stop("Column mismatch between Train and Test.")
+  }
+
+  if (r > ncol(X)) r <- ncol(X)
+
+  # --- Execution ---
+  res_list <- run_featuresrht_wrapper(X, y, X_test, y_test, 
+                                      as.integer(r), as.integer(bins),
+                                      run_uni, run_top, run_lev, run_sup)
+  
+  # Convert Indices to 1-based
+  for (nm in names(res_list)) {
+      res_list[[nm]]$Indices <- res_list[[nm]]$Indices + 1
+  }
+
+  return(res_list)
 }
-ensure_package("Rcpp")
-ensure_package("RcppEigen")
-ensure_package("data.table")
-
-library(Rcpp)
-library(RcppEigen)
-library(data.table)
-
-# --- CONFIGURATION ---
-sample_size_r <- 50
-bin_count <- 10
-
-# --- 2. Compile ---
-message("Compiling C++ source...")
-sourceCpp("FeatureSRHT.cpp") 
-
-# --- 3. Print Helper (SHOWS ALL COEFFICIENTS) ---
-print_results <- function(res_list, title_str) {
-  message(paste0("\n=========================================="))
-  message(paste0(" RESULTS: ", title_str))
-  message(paste0("=========================================="))
-  
-  if (length(res_list) == 0) return()
-  
-  for (item in res_list) {
-    method <- item$Method
-    r2 <- round(item$R_Squared, 4)
-    raw_coefs <- item$Coefficients
-    selected_indices <- item$Indices + 1 
-    total_d <- item$TotalFeatures
-    
-    cat(sprintf("[Method: %-10s] -> R^2: %.4f\n", method, r2))
-    
-    if (all(raw_coefs == 0) && length(raw_coefs) > 1) {
-      cat("  WARNING: Coefficients are all 0. Regression likely failed.\n\n")
-      next
-    }
-    
-    full_vector <- numeric(total_d)
-    intercept <- raw_coefs[1]
-    weights <- raw_coefs[-1]
-    
-    if(length(weights) == length(selected_indices)) {
-      full_vector[selected_indices] <- weights
-    }
-    
-    cat(sprintf("  Intercept: %.4f\n", intercept))
-    cat(sprintf("  Full Feature Vector (All %d values): \n  ", total_d))
-    cat(round(full_vector, 4), fill = TRUE)
-    cat("\n")
-  }
-}
-
-# --- 4. Wrapper Function ---
-run_isrht_wrapper <- function(user_csv_path = NULL, run_synthetic = TRUE) {
-  
-  # --- Scenario A: Synthetic Data ---
-  if (run_synthetic) {
-    message(paste0("\n--- Running on Synthetic Data (r=", sample_size_r, ") ---"))
-    set.seed(42)
-    N <- 2000; d <- 500
-    X_syn <- matrix(rnorm(N * d), nrow = N, ncol = d)
-    true_w <- rnorm(d)
-    y_syn <- X_syn %*% true_w + rnorm(N, 0, 0.5) 
-    
-    results_syn <- run_isrht_benchmark(X_syn, as.vector(y_syn), sample_size_r, bin_count)
-    print_results(results_syn, "Synthetic Data")
-  }
-  
-  # --- Scenario B: User CSV ---
-  if (!is.null(user_csv_path) && file.exists(user_csv_path)) {
-    message(paste0("\n--- Running on User CSV (r=", sample_size_r, ") ---"))
-    
-    data <- data.table::fread(user_csv_path)
-    y_col_idx <- ncol(data)
-    X_user <- as.matrix(data[, -..y_col_idx])
-    y_user <- as.vector(data[[y_col_idx]])
-    
-    # Data Cleaning for Stability
-    X_user[is.na(X_user)] <- 0
-    if(any(is.na(y_user))) y_user[is.na(y_user)] <- mean(y_user, na.rm=TRUE)
-    
-    if (ncol(X_user) < sample_size_r) sample_size_r <- ncol(X_user)
-    
-    results_user <- run_isrht_benchmark(X_user, y_user, sample_size_r, bin_count)
-    print_results(results_user, "User CSV Data")
-  }
-}
-
-# --- Execute ---
-run_isrht_wrapper()
-run_isrht_wrapper("chem_data.csv", run_synthetic = FALSE)
-
