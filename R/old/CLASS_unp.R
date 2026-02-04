@@ -77,7 +77,7 @@ CLASS_unp <- function(X = NULL, y = NULL, csv = NULL, header = FALSE, nSample = 
 
   intercept_col <- rep(x = 1, times = nrow(X_final))
   X_ols <- cbind(intercept_col, X_final)
-  beta_hat <- betaOLS_closed(X_ols, y_final)
+  beta_hat <- qr.solve(X_ols, y_final)
 
   intercept_hat <- beta_hat[1]
   beta_reduced  <- beta_hat[-1]
@@ -90,9 +90,12 @@ CLASS_unp <- function(X = NULL, y = NULL, csv = NULL, header = FALSE, nSample = 
 
   mse <- mean(residuals^2)
   r_squared <- 1 - sum(residuals^2) / sum((y - mean(y))^2)
-
+  print(mse)
   return(invisible(list(
-    beta = c(Intercept = intercept_hat, final_beta),
+    X_f = X_final,
+    y_f = y_final,
+    intercept_hat = intercept_hat,
+    beta_final = final_beta,
     selected_indices = active_vars + 1,
     feature_counts = freq_count,
     mse = mse,

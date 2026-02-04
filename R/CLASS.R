@@ -27,7 +27,7 @@
 #' \itemize{
 #' }
 #' @export
-CLASSp <- function(X = NULL, y = NULL, csv = NULL, header = FALSE, nSample = -1, nTimes = -1, k = -1) {
+CLASS <- function(X = NULL, y = NULL, csv = NULL, header = FALSE, nSample = -1, nTimes = -1, k = -1) {
   if (nSample == -1) {
     stop("Check input CLASS(..., nSample = (pos int), ...")
   }
@@ -65,7 +65,7 @@ CLASSp <- function(X = NULL, y = NULL, csv = NULL, header = FALSE, nSample = -1,
   X_big <- as.big.matrix(x = X, type = "double", backingfile = "X.bin", descriptorfile = "X.desc")
   X_desc <- describe(X_big)
 
-  y_big <- as.big.matrix(x = y, type = "double", backingfile = "y.bin", descriptorfile = "y.desc")
+  y_big <- as.big.matrix(x = matrix(y, ncol = 1), type = "double", backingfile = "y.bin", descriptorfile = "y.desc")
   y_desc <- describe(y_big)
 
   nC <- parallel::detectCores() - 1
@@ -76,6 +76,8 @@ CLASSp <- function(X = NULL, y = NULL, csv = NULL, header = FALSE, nSample = -1,
     acc + vec
   }
   freq_count <- foreach(i = 1:nTimes, .packages = c("bigmemory", "glmnet", "class"), .combine = accumulator) %dopar% {
+    if (i %% 1 == 0) paste(".") # Need an alternative here cuz parallel sessions?
+
     X_ref <- attach.big.matrix(X_desc)
     y_ref <- attach.big.matrix(y_desc)
     set.seed(42 + i)
@@ -87,11 +89,11 @@ CLASSp <- function(X = NULL, y = NULL, csv = NULL, header = FALSE, nSample = -1,
     coefs <- coef(fit, s = "lambda.min")[-1]
     as.numeric(coefs != 0)
   }
-  print(freq_count)
+  gc() # Should check if this affects runtime
   stopCluster(cl)
-  cat("\n")
-  kboss_res <- kBOSS(X, y, freq_count, k)
 
+  # Should optimise the below
+  kboss_res <- kBOSS(X, y, freq_count, k)
   X_final <- kboss_res$X
   y_final <- kboss_res$y
   active_vars <- kboss_res$selected_vars
@@ -111,7 +113,8 @@ CLASSp <- function(X = NULL, y = NULL, csv = NULL, header = FALSE, nSample = -1,
 
   mse <- mean(residuals^2)
   r_squared <- 1 - sum(residuals^2) / sum((y - mean(y))^2)
-  print(mse)
+
+  unlink(c("X.bin", "X.desc", "y.bin", "y.desc"))
   return(invisible(list(
     X_f = X_final,
     y_f = y_final,
